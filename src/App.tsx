@@ -26,7 +26,7 @@ interface UserProfile {
   phone: string;
 }
 
-const DEFAULT_CATEGORIES = ['Personal', 'Brand', 'Company', 'Other'];
+const DEFAULT_CATEGORIES = ['Personal', 'Brand', 'Company'];
 
 // Compatibility Matrix (Standard numerology harmony)
 const COMPATIBILITY_MAP: Record<number, { good: number[], bad: number[] }> = {
@@ -102,6 +102,10 @@ export default function App() {
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>('All');
+  
+  // Custom Category Add
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
   
   // New User Form
   const [newName, setNewName] = useState('');
@@ -408,16 +412,6 @@ export default function App() {
                 <div className="flex flex-col gap-2">
                   <h3 className="text-[10px] font-black text-gray-400 uppercase tracking-[4px] pl-1 mb-2">Management</h3>
                   <button 
-                    onClick={() => { 
-                      const name = prompt('New Category Name:');
-                      if (name) addCategory(name);
-                    }}
-                    className="flex items-center gap-4 p-4 text-gray-600 hover:bg-gray-50 rounded-2xl font-black text-sm transition-all"
-                  >
-                    <FolderHeart className="text-accent/40" size={18} />
-                    <span>Manage Categories</span>
-                  </button>
-                  <button 
                     onClick={handleLogout}
                     className="flex items-center gap-4 p-4 text-red-500 hover:bg-red-50 rounded-2xl font-black text-sm transition-all"
                   >
@@ -455,8 +449,7 @@ export default function App() {
                   { id: 'bulk', label: 'Bulk Check', icon: <Plus size={32} />, desc: 'Multiple entries', color: 'bg-purple-500' },
                   { id: 'compat', label: 'Compatibility', icon: <Handshake size={32} />, desc: 'Harmony match', color: 'bg-rose-500' },
                   { id: 'saved', label: 'Library', icon: <Bookmark size={32} />, desc: 'Browse saved', color: 'bg-amber-500' },
-                  { id: 'history', label: 'Recent', icon: <History size={32} />, desc: 'Your session', color: 'bg-emerald-500' },
-                  { id: 'categories', label: 'Manage', icon: <FolderHeart size={32} />, desc: 'Custom labels', action: () => setIsMenuOpen(true), color: 'bg-gray-800' }
+                  { id: 'history', label: 'Recent', icon: <History size={32} />, desc: 'Your session', color: 'bg-emerald-500' }
                 ].map(item => (
                   <button
                     key={item.id}
@@ -561,7 +554,7 @@ export default function App() {
                     {[
                       { l: 'Google', v: 'Business' },
                       { l: 'Tesla', v: 'Innovation' },
-                      { l: 'Pratik', v: 'User Sample' },
+                      { l: 'Golecha', v: 'Brand Sample' },
                       { l: '3-6-9', v: 'Tesla Secret' },
                       { l: 'Apple Inc', v: 'Brand' },
                       { l: 'Success', v: 'Aspiration' }
@@ -1046,20 +1039,68 @@ export default function App() {
               <h3 className="text-xl font-black text-gray-800 mb-2">Save Selection</h3>
               <p className="text-sm text-gray-500 mb-6 font-medium">Choose a category for <span className="text-accent font-bold">"{currentResult?.raw}"</span></p>
               
-              <div className="grid grid-cols-2 gap-3 mb-8 max-h-[200px] overflow-y-auto no-scrollbar">
+              <div className="grid grid-cols-2 gap-3 mb-8 max-h-[250px] overflow-y-auto no-scrollbar p-1">
                 {customCategories.map(cat => (
                   <button
                     key={cat}
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`py-3 px-4 rounded-xl border-2 font-bold text-sm transition-all ${
-                      selectedCategory === cat 
-                        ? 'bg-accent border-accent text-white shadow-lg' 
+                    onClick={() => {
+                      setSelectedCategory(cat);
+                      setIsAddingCategory(false);
+                    }}
+                    className={`py-3 px-4 rounded-xl border-2 font-bold text-sm transition-all text-left truncate ${
+                      selectedCategory === cat && !isAddingCategory
+                        ? 'bg-accent border-accent text-white shadow-lg shadow-accent/20' 
                         : 'border-gray-100 text-gray-400 hover:border-gray-200'
                     }`}
                   >
                     {cat}
                   </button>
                 ))}
+                
+                {isAddingCategory ? (
+                  <div className="col-span-2 flex items-center gap-2 mt-1">
+                    <input 
+                      type="text" 
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="New category..."
+                      className="flex-1 px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-sm font-bold focus:border-accent focus:ring-0 outline-none text-gray-700"
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newCategoryName.trim()) {
+                          addCategory(newCategoryName.trim());
+                          setSelectedCategory(newCategoryName.trim());
+                          setNewCategoryName('');
+                          setIsAddingCategory(false);
+                        }
+                      }}
+                    />
+                    <button 
+                      onClick={() => {
+                        if (newCategoryName.trim()) {
+                          addCategory(newCategoryName.trim());
+                          setSelectedCategory(newCategoryName.trim());
+                          setNewCategoryName('');
+                          setIsAddingCategory(false);
+                        } else {
+                          setIsAddingCategory(false);
+                        }
+                      }}
+                      className="bg-accent text-white px-4 py-3 rounded-xl font-black text-sm shadow-md shadow-accent/20"
+                    >
+                      {newCategoryName.trim() ? 'Add' : 'Hide'}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setIsAddingCategory(true);
+                    }}
+                    className="py-3 px-4 rounded-xl border-2 border-dashed border-gray-200 text-gray-400 hover:border-accent hover:text-accent hover:bg-accent/5 font-bold text-sm transition-all flex items-center justify-center gap-2"
+                  >
+                    <Plus size={16} /> New
+                  </button>
+                )}
               </div>
 
               <div className="flex gap-3">
