@@ -23,7 +23,8 @@ type Tab = 'home' | 'calc' | 'bulk' | 'compat' | 'saved' | 'history';
 interface UserProfile {
   id: string;
   name: string;
-  phone: string;
+  email?: string;
+  phone?: string;
 }
 
 const DEFAULT_CATEGORIES = ['Personal', 'Brand', 'Company'];
@@ -110,9 +111,7 @@ export default function App() {
   // New User Form
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
-  const [regPassword, setRegPassword] = useState('');
   const [loginPhone, setLoginPhone] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
   const [regStep, setRegStep] = useState<'form' | 'success'>('form');
   const [authTab, setAuthTab] = useState<'login' | 'register'>('register');
@@ -132,8 +131,16 @@ export default function App() {
     };
     const res = await fetch(`/api${path}`, { ...options, headers });
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || res.statusText);
+      let errorMsg = res.statusText;
+      try {
+        const errData = await res.json();
+        errorMsg = errData.error || errData.message || errorMsg;
+      } catch(e) {
+        // Fallback to raw text if it's not JSON
+        const text = await res.text();
+        if (text) errorMsg = text;
+      }
+      throw new Error(errorMsg);
     }
     return res.json();
   };
@@ -204,24 +211,24 @@ export default function App() {
   }, [customCategories, currentUser]);
 
   const handleRegister = async () => {
-    if (!newName || !newPhone || !regPassword) return;
+    if (!newName || !newPhone) return;
     setAuthLoading(true);
     try {
       await fetchApi('/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ name: newName, phone: newPhone, password: regPassword, username: newPhone })
+        // Update to use phone based on user request. User will update their backend API to handle this!
+        body: JSON.stringify({ name: newName, phone: newPhone, username: newPhone })
       });
       // automatically login after register
       const loginRes = await fetchApi('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ phone: newPhone, password: regPassword, username: newPhone })
+        body: JSON.stringify({ phone: newPhone, username: newPhone })
       });
       localStorage.setItem('token', loginRes.token);
       await loadBackendData();
       setIsUserModalOpen(false);
       setNewName('');
       setNewPhone('');
-      setRegPassword('');
     } catch(err: any) {
       alert('Registration failed: ' + err.message);
     }
@@ -229,18 +236,17 @@ export default function App() {
   };
 
   const handleLogin = async () => {
-    if (!loginPhone || !loginPassword) return;
+    if (!loginPhone) return;
     setAuthLoading(true);
     try {
       const res = await fetchApi('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ phone: loginPhone, password: loginPassword, username: loginPhone })
+        body: JSON.stringify({ phone: loginPhone, username: loginPhone })
       });
       localStorage.setItem('token', res.token);
       await loadBackendData();
       setIsUserModalOpen(false);
       setLoginPhone('');
-      setLoginPassword('');
     } catch(err: any) {
       alert('Login failed: ' + err.message);
     }
@@ -1648,13 +1654,6 @@ export default function App() {
                           placeholder="Phone Number / Username"
                           className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
                         />
-                        <input
-                          type="password"
-                          value={loginPassword}
-                          onChange={(e) => setLoginPassword(e.target.value)}
-                          placeholder="Password"
-                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
-                        />
                         <button 
                           onClick={handleLogin}
                           disabled={authLoading}
@@ -1680,14 +1679,6 @@ export default function App() {
                           value={newPhone}
                           onChange={(e) => setNewPhone(e.target.value)}
                           placeholder="Phone Number"
-                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
-                        />
-                        
-                        <input
-                          type="password"
-                          value={regPassword}
-                          onChange={(e) => setRegPassword(e.target.value)}
-                          placeholder="Password"
                           className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
                         />
                         <button 
