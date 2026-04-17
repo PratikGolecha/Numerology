@@ -112,6 +112,10 @@ export default function App() {
   const [newPhone, setNewPhone] = useState('');
   const [regStep, setRegStep] = useState<'form' | 'success'>('form');
   const [authTab, setAuthTab] = useState<'login' | 'register'>('register');
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [itemToSave, setItemToSave] = useState<CalculationResult | { r1: CalculationResult, r2: CalculationResult, compat: any } | null>(null);
+  const [bulkItemsToSave, setBulkItemsToSave] = useState<CalculationResult[] | null>(null);
+  const [preferredNumber, setPreferredNumber] = useState('');
 
   // Persistence
   useEffect(() => {
@@ -230,9 +234,43 @@ export default function App() {
   };
 
   const handleSave = () => {
-    if (!currentResult || !currentUser) return;
+    if (!currentUser) return;
+
+    if (bulkItemsToSave && bulkItemsToSave.length > 0) {
+      const newItems: SavedItem[] = bulkItemsToSave.map(item => ({
+        ...item,
+        id: Math.random().toString(36).substr(2, 9),
+        category: selectedCategory,
+        timestamp: Date.now(),
+        createdBy: currentUser.name
+      }));
+      setSavedItems(prev => [...newItems, ...prev]);
+      setIsSaveModalOpen(false);
+      setBulkItemsToSave(null);
+      return;
+    }
+
+    const targetItem = itemToSave || currentResult;
+    if (!targetItem) return;
+    if (targetItem && 'compat' in targetItem) {
+        // Handle Harmony saving
+        const newItem: SavedItem = {
+          ...targetItem.r1,
+          id: Math.random().toString(36).substr(2, 9),
+          category: selectedCategory,
+          timestamp: Date.now(),
+          createdBy: currentUser.name,
+          harmonyWith: targetItem.r2,
+          harmonyCompat: targetItem.compat
+        };
+        setSavedItems(prev => [newItem, ...prev]);
+        setIsSaveModalOpen(false);
+        setItemToSave(null);
+        return;
+    }
+
     const newItem: SavedItem = {
-      ...currentResult,
+      ...targetItem,
       id: Math.random().toString(36).substr(2, 9),
       category: selectedCategory,
       timestamp: Date.now(),
@@ -240,6 +278,7 @@ export default function App() {
     };
     setSavedItems(prev => [newItem, ...prev]);
     setIsSaveModalOpen(false);
+    setItemToSave(null);
   };
 
   const deleteSaved = (id: string) => {
@@ -248,7 +287,7 @@ export default function App() {
 
   const handleShare = () => {
     if (!currentResult) return;
-    const text = `Numerology Report for: ${currentResult.raw}\nSystem: ${currentResult.system}\nReduced: ${currentResult.reduced}\nSoul Urge: ${currentResult.soulUrge}\nPersonality: ${currentResult.personality}`;
+    const text = `Name: ${currentResult.raw}\n${currentResult.system} Numerology No: ${currentResult.reduced}\nCompound: ${currentResult.compound}\n\nGenerated with Golecha Numerology Calculator`;
     navigator.clipboard.writeText(text);
     setShowShareToast(true);
     setTimeout(() => setShowShareToast(false), 2000);
@@ -264,16 +303,155 @@ export default function App() {
     const element = document.getElementById('report-container');
     if (!element) return;
     
-    // Temporarily hide buttons for capture
-    const capture = await html2canvas(element, { scale: 2, useCORS: true });
-    const imgData = capture.toDataURL('image/png');
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    const imgProps = pdf.getImageProperties(imgData);
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+    setIsGeneratingPDF(true);
+    try {
+      const capture = await html2canvas(element, { scale: 2, useCORS: true });
+      const imgData = capture.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`numerology-report-${input || 'result'}.pdf`);
+    } catch (e) {
+      console.error('PDF generation failed', e);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
+  const getBulkResultsText = () => {
+    const results = inputBulk.split(/[\n;]+/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(name => {
+        const res = calculate(name, system);
+        return `Name: ${res.raw}\n${res.system} Numerology No: ${res.reduced}\nCompound: ${res.compound}`;
+      })
+      .join('\n\n');
+    return `Bulk Numerology Report:\n\n${results}\n\nGenerated with Golecha Numerology Calculator`;
+  };
+
+  const handleBulkShare = () => {
+    if (!inputBulk.trim()) return;
+    navigator.clipboard.writeText(getBulkResultsText());
+    setShowShareToast(true);
+    setTimeout(() => setShowShareToast(false), 2000);
+  };
+
+  const getPreferredResultsText = () => {
+    if (!preferredNumber) return '';
+    const results = inputBulk.split(/[\n;]+/)
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map(name => calculate(name, system))
+      .filter(res => res.reduced.toString() === preferredNumber || res.compound.toString() === preferredNumber)
+      .map(res => `Name: ${res.raw}\n${res.system} Numerology No: ${res.reduced}\nCompound: ${res.compound}`)
+      .join('\n\n');
+      
+    if (!results) return `No matches found for preferred number ${preferredNumber}`;
+    return `Preferred Numbers Report (Target: ${preferredNumber}):\n\n${results}\n\nGenerated with Golecha Numerology Calculator`;
+  };
+
+  const handlePreferredShare = () => {
+    if (!inputBulk.trim() || !preferredNumber) return;
+    navigator.clipboard.writeText(getPreferredResultsText());
+    setShowShareToast(true);
+    setTimeout(() => setShowShareToast(false), 2000);
+  };
+
+  const sharePreferredToWhatsApp = () => {
+    if (!inputBulk.trim() || !preferredNumber) return;
+    window.open(`https://wa.me/?text=${encodeURIComponent(getPreferredResultsText())}`, '_blank');
+  };
+
+  const shareBulkToWhatsApp = () => {
+    if (!inputBulk.trim()) return;
+    window.open(`https://wa.me/?text=${encodeURIComponent(getBulkResultsText())}`, '_blank');
+  };
+
+  const exportBulkToPDF = async () => {
+    const element = document.getElementById('bulk-report-container');
+    if (!element) return;
     
-    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-    pdf.save(`numerology-report-${input || 'result'}.pdf`);
+    setIsGeneratingPDF(true);
+    try {
+      const capture = await html2canvas(element, { scale: 2, useCORS: true });
+      const imgData = capture.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`bulk-numerology-report.pdf`);
+    } catch (e) {
+      console.error('PDF generation failed', e);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
+  const exportPreferredToPDF = async () => {
+    const element = document.getElementById('preferred-report-container');
+    if (!element) return;
+    
+    setIsGeneratingPDF(true);
+    try {
+      const capture = await html2canvas(element, { scale: 2, useCORS: true });
+      const imgData = capture.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`preferred-numerology-report-${preferredNumber}.pdf`);
+    } catch (e) {
+      console.error('PDF generation failed', e);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
+  const getHarmonyText = () => {
+    if (!compatResults) return '';
+    return `Harmony Check Report:\n\nPrimary: ${compatResults.r1.raw} (${compatResults.r1.reduced})\nSecondary: ${compatResults.r2.raw} (${compatResults.r2.reduced})\n\nResonance: ${compatResults.compat.score}% - ${compatResults.compat.status}\n\n${compatResults.compat.desc}\n\nGenerated with Golecha Numerology Calculator`;
+  };
+
+  const handleHarmonyShare = () => {
+    if (!compatResults) return;
+    navigator.clipboard.writeText(getHarmonyText());
+    setShowShareToast(true);
+    setTimeout(() => setShowShareToast(false), 2000);
+  };
+
+  const shareHarmonyToWhatsApp = () => {
+    if (!compatResults) return;
+    window.open(`https://wa.me/?text=${encodeURIComponent(getHarmonyText())}`, '_blank');
+  };
+
+  const exportHarmonyToPDF = async () => {
+    const element = document.getElementById('harmony-report-container');
+    if (!element) return;
+    
+    setIsGeneratingPDF(true);
+    try {
+      const capture = await html2canvas(element, { scale: 2, useCORS: true });
+      const imgData = capture.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`harmony-report.pdf`);
+    } catch (e) {
+      console.error('PDF generation failed', e);
+    } finally {
+      setIsGeneratingPDF(false);
+    }
   };
 
   const clearHistory = () => setHistory([]);
@@ -619,9 +797,18 @@ export default function App() {
                         </button>
                         <button 
                           onClick={exportToPDF}
-                          className="flex-1 py-3 bg-red-50 border border-red-100 rounded-xl text-xs font-bold text-red-600 hover:bg-red-100 flex items-center justify-center gap-2"
+                          disabled={isGeneratingPDF}
+                          className={`flex-1 py-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all ${
+                            isGeneratingPDF 
+                              ? 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed' 
+                              : 'bg-red-50 border border-red-100 text-red-600 hover:bg-red-100'
+                          }`}
                         >
-                          <FileDown size={14} /> PDF
+                          {isGeneratingPDF ? (
+                            <><RefreshCcw size={14} className="animate-spin" /> Processing</>
+                          ) : (
+                            <><FileDown size={14} /> PDF</>
+                          )}
                         </button>
                       </div>
 
@@ -726,41 +913,88 @@ export default function App() {
                   </div>
                 </div>
                 
+                <p className="text-xs text-gray-500 font-medium pb-2 border-b border-gray-50">
+                  Enter multiple names to analyze them all at once. Separate each name using a <strong>new line</strong> or a <strong>semicolon (;)</strong>.
+                </p>
+
                 <textarea
                   value={inputBulk}
                   onChange={(e) => setInputBulk(e.target.value)}
-                  placeholder="Enter names (one per line)..."
+                  placeholder="Enter names (e.g. John Doe; Jane Smith)..."
                   rows={8}
                   className="w-full bg-gray-50 border-none rounded-2xl p-6 font-bold text-gray-800 outline-none focus:ring-2 focus:ring-accent/20 transition-all resize-none"
                 />
+
+                <div className="flex flex-col gap-2 mt-2">
+                  <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest pl-1">Preferred Target Number (Optional)</label>
+                  <input
+                    type="number"
+                    value={preferredNumber}
+                    onChange={(e) => setPreferredNumber(e.target.value)}
+                    placeholder="e.g., 9"
+                    className="w-full bg-[#f0f4f0] border-none rounded-2xl px-5 py-4 font-bold text-gray-800 outline-none focus:ring-2 focus:ring-accent/20 transition-all"
+                  />
+                </div>
                 
-                {inputBulk.trim() && (
+                <div className="flex gap-2 w-full mt-2">
                   <button 
                     onClick={() => {
-                      const textLines = inputBulk.split('\n')
+                      if (!inputBulk.trim()) return;
+                      const results = inputBulk.split(/[\n;]+/)
                         .map(line => line.trim())
                         .filter(line => line.length > 0)
-                        .map(name => {
-                          const res = calculate(name, system);
-                          return `${name} - ${system} No: ${res.reduced} (${res.compound})`;
-                        })
-                        .join('\n');
-                      navigator.clipboard.writeText(textLines);
-                      setShowShareToast(true);
-                      setTimeout(() => setShowShareToast(false), 2000);
+                        .map(name => calculate(name, system));
+                      setBulkItemsToSave(results);
+                      setIsSaveModalOpen(true);
                     }}
-                    className="w-full py-4 bg-gray-900 text-white rounded-2xl font-black text-sm uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                    disabled={!inputBulk.trim()}
+                    className={`flex-1 py-4 border rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                      !inputBulk.trim() ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-800 border-gray-800 text-white active:scale-95'
+                    }`}
                   >
-                    <Share2 size={16} /> Copy All Results
+                    <Bookmark size={16} /> Save All
                   </button>
-                )}
+                  <button 
+                    onClick={handleBulkShare}
+                    disabled={!inputBulk.trim()}
+                    className={`flex-1 py-4 border rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                      !inputBulk.trim() ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-gray-900 border-gray-900 text-white active:scale-95'
+                    }`}
+                  >
+                    <Share2 size={16} /> Copy
+                  </button>
+                  <button 
+                    onClick={shareBulkToWhatsApp}
+                    disabled={!inputBulk.trim()}
+                    className={`flex-1 py-4 border rounded-2xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 ${
+                      !inputBulk.trim() ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#25D366]/10 border-[#25D366]/20 text-[#128C7E] hover:bg-[#25D366]/20 active:scale-95'
+                    }`}
+                  >
+                    <MessageSquare size={16} /> WhatsApp
+                  </button>
+                  <button 
+                    onClick={exportBulkToPDF}
+                    disabled={!inputBulk.trim() || isGeneratingPDF}
+                    className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all border ${
+                      !inputBulk.trim() || isGeneratingPDF
+                        ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' 
+                        : 'bg-red-50 border-red-100 text-red-600 hover:bg-red-100 active:scale-95'
+                    }`}
+                  >
+                    {isGeneratingPDF ? (
+                      <><RefreshCcw size={16} className="animate-spin" /> Processing</>
+                    ) : (
+                      <><FileDown size={16} /> PDF</>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {inputBulk.trim() && (
-                <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 overflow-hidden">
+                <div id="bulk-report-container" className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 overflow-hidden">
                   <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Live Preview</h3>
                   <div className="flex flex-col gap-3">
-                    {inputBulk.split('\n').filter(l => l.trim()).map((line, idx) => {
+                    {inputBulk.split(/[\n;]+/).filter(l => l.trim()).map((line, idx) => {
                       const res = calculate(line.trim(), system);
                       return (
                         <div key={idx} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0 group">
@@ -773,11 +1007,97 @@ export default function App() {
                             <div className="w-10 h-10 rounded-xl bg-gray-50 text-gray-400 flex items-center justify-center font-bold text-xs">
                               {res.compound}
                             </div>
+                            <button 
+                              onClick={() => {
+                                setItemToSave(res);
+                                setIsSaveModalOpen(true);
+                              }}
+                              className="w-10 h-10 ml-2 rounded-xl bg-accent/5 text-accent flex items-center justify-center hover:bg-accent hover:text-white transition-colors border border-accent/10 shadow-sm"
+                              title="Save to Library"
+                            >
+                              <Bookmark size={16} />
+                            </button>
                           </div>
                         </div>
                       );
                     })}
                   </div>
+                </div>
+              )}
+
+              {inputBulk.trim() && preferredNumber && (
+                <div id="preferred-report-container" className="bg-green-50 rounded-3xl p-6 shadow-sm border border-green-100 overflow-hidden">
+                  <h3 className="text-xs font-black text-green-600 uppercase tracking-widest mb-4 flex items-center justify-between">
+                    <span>Preferred Matches ({preferredNumber})</span>
+                    <Star size={14} className="text-green-500 fill-current" />
+                  </h3>
+                  <div className="flex flex-col gap-3">
+                    {inputBulk.split(/[\n;]+/).filter(l => l.trim()).map(line => calculate(line.trim(), system))
+                      .filter(res => res.reduced.toString() === preferredNumber || res.compound.toString() === preferredNumber)
+                      .map((res, idx) => (
+                        <div key={idx} className="flex items-center justify-between py-2 border-b border-green-200/50 last:border-0 group">
+                          <span className="font-bold text-green-900 truncate">{res.raw}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-[10px] font-black text-green-600/60 uppercase tracking-tighter">{system}</span>
+                            <div className="w-10 h-10 rounded-xl bg-green-500 text-white flex items-center justify-center font-black text-lg shadow-sm">
+                              {res.reduced}
+                            </div>
+                            <div className="w-10 h-10 rounded-xl bg-white text-green-600 border border-green-200 flex items-center justify-center font-bold text-xs">
+                              {res.compound}
+                            </div>
+                            <button 
+                              onClick={() => {
+                                setItemToSave(res);
+                                setIsSaveModalOpen(true);
+                              }}
+                              className="w-10 h-10 ml-2 rounded-xl bg-white/50 text-green-600 flex items-center justify-center hover:bg-green-600 hover:text-white transition-colors shadow-sm"
+                              title="Save to Library"
+                            >
+                              <Bookmark size={16} />
+                            </button>
+                          </div>
+                        </div>
+                    ))}
+                    {inputBulk.split(/[\n;]+/).filter(l => l.trim()).map(line => calculate(line.trim(), system))
+                      .filter(res => res.reduced.toString() === preferredNumber || res.compound.toString() === preferredNumber).length === 0 && (
+                        <div className="text-sm font-bold text-green-600/60 text-center py-4">
+                          No matches found.
+                        </div>
+                    )}
+                  </div>
+                  
+                  {inputBulk.split(/[\n;]+/).filter(l => l.trim()).map(line => calculate(line.trim(), system))
+                      .filter(res => res.reduced.toString() === preferredNumber || res.compound.toString() === preferredNumber).length > 0 && (
+                    <div className="flex gap-2 w-full mt-6">
+                      <button 
+                        onClick={handlePreferredShare}
+                        className="flex-1 py-4 bg-green-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                      >
+                        <Share2 size={16} /> Copy
+                      </button>
+                      <button 
+                        onClick={sharePreferredToWhatsApp}
+                        className="flex-1 py-4 bg-[#25D366] text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2"
+                      >
+                        <MessageSquare size={16} /> WhatsApp
+                      </button>
+                      <button 
+                        onClick={exportPreferredToPDF}
+                        disabled={isGeneratingPDF}
+                        className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all ${
+                          isGeneratingPDF 
+                            ? 'bg-green-100/50 border border-green-200 text-green-400 cursor-not-allowed' 
+                            : 'bg-green-100 text-green-700 hover:bg-green-200 active:scale-95'
+                        }`}
+                      >
+                        {isGeneratingPDF ? (
+                          <><RefreshCcw size={16} className="animate-spin" /> Processing</>
+                        ) : (
+                          <><FileDown size={16} /> PDF</>
+                        )}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>
@@ -827,7 +1147,46 @@ export default function App() {
                   animate={{ opacity: 1, scale: 1 }}
                   className="flex flex-col gap-6"
                 >
-                  <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 flex flex-col items-center gap-6">
+                  <div className="flex gap-2 w-full">
+                    <button 
+                      onClick={() => {
+                        setItemToSave(compatResults);
+                        setIsSaveModalOpen(true);
+                      }}
+                      className="flex-1 py-4 border border-gray-900 bg-gray-900 text-white rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <Bookmark size={16} /> Save
+                    </button>
+                    <button 
+                      onClick={handleHarmonyShare}
+                      className="flex-1 py-4 border bg-white border-gray-200 text-gray-700 hover:bg-gray-50 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <Share2 size={16} /> Copy
+                    </button>
+                    <button 
+                      onClick={shareHarmonyToWhatsApp}
+                      className="flex-1 py-4 bg-[#25D366]/10 border border-[#25D366]/20 text-[#128C7E] hover:bg-[#25D366]/20 rounded-2xl font-black text-xs uppercase tracking-widest active:scale-95 transition-all flex items-center justify-center gap-2 shadow-sm"
+                    >
+                      <MessageSquare size={16} /> WhatsApp
+                    </button>
+                    <button 
+                      onClick={exportHarmonyToPDF}
+                      disabled={isGeneratingPDF}
+                      className={`flex-1 py-4 rounded-2xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition-all border shadow-sm ${
+                        isGeneratingPDF 
+                          ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' 
+                          : 'bg-red-50 border-red-100 text-red-600 hover:bg-red-100 active:scale-95'
+                      }`}
+                    >
+                      {isGeneratingPDF ? (
+                        <RefreshCcw size={16} className="animate-spin" />
+                      ) : (
+                        <><FileDown size={16} /> PDF</>
+                      )}
+                    </button>
+                  </div>
+
+                  <div id="harmony-report-container" className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 flex flex-col items-center gap-6">
                     <div className="flex items-center gap-10">
                       <div className="flex flex-col items-center gap-2">
                         <div className="w-16 h-16 bg-[#607d8b] rounded-full flex items-center justify-center text-white font-black text-2xl shadow-lg border-4 border-gray-50">
@@ -1027,7 +1386,11 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsSaveModalOpen(false)}
+              onClick={() => {
+                setIsSaveModalOpen(false);
+                setItemToSave(null);
+                setBulkItemsToSave(null);
+              }}
               className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm"
             />
             <motion.div 
@@ -1037,7 +1400,7 @@ export default function App() {
               className="bg-white w-full max-w-sm rounded-[40px] sm:rounded-3xl p-8 relative z-10 shadow-2xl"
             >
               <h3 className="text-xl font-black text-gray-800 mb-2">Save Selection</h3>
-              <p className="text-sm text-gray-500 mb-6 font-medium">Choose a category for <span className="text-accent font-bold">"{currentResult?.raw}"</span></p>
+              <p className="text-sm text-gray-500 mb-6 font-medium">Choose a category for <span className="text-accent font-bold">"{bulkItemsToSave ? `${bulkItemsToSave.length} Items` : (itemToSave && 'compat' in itemToSave ? `${itemToSave.r1.raw} & ${itemToSave.r2.raw}` : (itemToSave ? itemToSave.raw : currentResult?.raw))}"</span></p>
               
               <div className="grid grid-cols-2 gap-3 mb-8 max-h-[250px] overflow-y-auto no-scrollbar p-1">
                 {customCategories.map(cat => (
@@ -1105,7 +1468,11 @@ export default function App() {
 
               <div className="flex gap-3">
                 <button 
-                  onClick={() => setIsSaveModalOpen(false)}
+                  onClick={() => {
+                    setIsSaveModalOpen(false);
+                    setItemToSave(null);
+                    setBulkItemsToSave(null);
+                  }}
                   className="flex-1 py-4 text-sm font-bold text-gray-400 hover:text-gray-600 transition-colors"
                 >
                   Cancel
