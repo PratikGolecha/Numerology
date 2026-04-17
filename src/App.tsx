@@ -110,6 +110,10 @@ export default function App() {
   // New User Form
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [loginPhone, setLoginPhone] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
   const [regStep, setRegStep] = useState<'form' | 'success'>('form');
   const [authTab, setAuthTab] = useState<'login' | 'register'>('register');
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -118,62 +122,129 @@ export default function App() {
   const [bulkItemsToSave, setBulkItemsToSave] = useState<CalculationResult[] | null>(null);
   const [preferredNumber, setPreferredNumber] = useState('');
 
+  // API Helper
+  const fetchApi = async (path: string, options: any = {}) => {
+    const token = localStorage.getItem('token');
+    const headers = {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers || {})
+    };
+    const res = await fetch(`/api${path}`, { ...options, headers });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || res.statusText);
+    }
+    return res.json();
+  };
+
   // Persistence
   useEffect(() => {
-    const saved = localStorage.getItem('numerology_saved');
-    const hist = localStorage.getItem('numerology_history');
-    const localUsers = localStorage.getItem('numerology_users');
-    const localCurrentUser = localStorage.getItem('numerology_currentUser');
-    const localCats = localStorage.getItem('numerology_categories');
-
-    if (saved) setSavedItems(JSON.parse(saved));
-    if (hist) setHistory(JSON.parse(hist));
-    
-    if (localUsers) {
-      const parsedUsers = JSON.parse(localUsers);
-      setUsers(parsedUsers);
-      if (parsedUsers.length > 0) {
-        setAuthTab('login');
-      }
-    }
-    
-    if (localCurrentUser) setCurrentUser(JSON.parse(localCurrentUser));
-    if (localCats) setCustomCategories(JSON.parse(localCats));
-    
-    // If no user, force selection
-    if (!localCurrentUser) {
+    const token = localStorage.getItem('token');
+    if (token) {
+      loadBackendData();
+    } else {
       setIsUserModalOpen(true);
     }
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem('numerology_saved', JSON.stringify(savedItems));
-  }, [savedItems]);
+  const loadBackendData = async () => {
+    try {
+      const userRes = await fetchApi('/auth/me');
+      setCurrentUser(userRes.user || userRes);
+      
+      try {
+        const savedRes = await fetchApi('/user/data/saved');
+        if (savedRes && savedRes.data) setSavedItems(savedRes.data);
+      } catch(e) {}
+      
+      try {
+        const histRes = await fetchApi('/user/data/history');
+        if (histRes && histRes.data) setHistory(histRes.data);
+      } catch(e) {}
+      
+      try {
+        const catsRes = await fetchApi('/user/data/categories');
+        if (catsRes && catsRes.data && catsRes.data.length > 0) setCustomCategories(catsRes.data);
+      } catch(e) {}
+      
+    } catch(err) {
+      console.error('Failed to load user', err);
+      localStorage.removeItem('token');
+      setCurrentUser(null);
+      setIsUserModalOpen(true);
+    }
+  };
 
   useEffect(() => {
-    localStorage.setItem('numerology_history', JSON.stringify(history));
-  }, [history]);
+    if (currentUser) {
+      fetchApi('/user/data', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'saved', data: savedItems })
+      }).catch(console.error);
+    }
+  }, [savedItems, currentUser]);
 
   useEffect(() => {
-    localStorage.setItem('numerology_users', JSON.stringify(users));
-  }, [users]);
+    if (currentUser) {
+      fetchApi('/user/data', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'history', data: history })
+      }).catch(console.error);
+    }
+  }, [history, currentUser]);
 
   useEffect(() => {
-    if (currentUser) localStorage.setItem('numerology_currentUser', JSON.stringify(currentUser));
-  }, [currentUser]);
+    if (currentUser) {
+      fetchApi('/user/data', {
+        method: 'POST',
+        body: JSON.stringify({ type: 'categories', data: customCategories })
+      }).catch(console.error);
+    }
+  }, [customCategories, currentUser]);
 
-  useEffect(() => {
-    localStorage.setItem('numerology_categories', JSON.stringify(customCategories));
-  }, [customCategories]);
+  const handleRegister = async () => {
+    if (!newName || !newPhone || !regPassword) return;
+    setAuthLoading(true);
+    try {
+      await fetchApi('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ name: newName, phone: newPhone, password: regPassword, username: newPhone })
+      });
+      // automatically login after register
+      const loginRes = await fetchApi('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ phone: newPhone, password: regPassword, username: newPhone })
+      });
+      localStorage.setItem('token', loginRes.token);
+      await loadBackendData();
+      setIsUserModalOpen(false);
+      setNewName('');
+      setNewPhone('');
+      setRegPassword('');
+    } catch(err: any) {
+      alert('Registration failed: ' + err.message);
+    }
+    setAuthLoading(false);
+  };
 
-  const handleCreateUser = () => {
-    if (!newName || !newPhone) return;
-    const newUser = { id: Math.random().toString(36).substr(2, 9), name: newName, phone: newPhone };
-    setUsers(prev => [...prev, newUser]);
-    setCurrentUser(newUser);
-    setNewName('');
-    setNewPhone('');
-    setIsUserModalOpen(false);
+  const handleLogin = async () => {
+    if (!loginPhone || !loginPassword) return;
+    setAuthLoading(true);
+    try {
+      const res = await fetchApi('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ phone: loginPhone, password: loginPassword, username: loginPhone })
+      });
+      localStorage.setItem('token', res.token);
+      await loadBackendData();
+      setIsUserModalOpen(false);
+      setLoginPhone('');
+      setLoginPassword('');
+    } catch(err: any) {
+      alert('Login failed: ' + err.message);
+    }
+    setAuthLoading(false);
   };
 
   const calculate = (str: string, sys: NumerologySystem): CalculationResult => {
@@ -1568,68 +1639,30 @@ export default function App() {
 
                   {authTab === 'login' ? (
                     <div className="flex flex-col gap-6">
-                      {users.length > 0 ? (
-                        <div className="flex flex-col gap-4">
-                          <div className="flex flex-col gap-2">
-                            <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">Select User Name</label>
-                            <div className="relative">
-                              <select 
-                                value={currentUser?.id || ''}
-                                onChange={(e) => {
-                                  const user = users.find(u => u.id === e.target.value);
-                                  if (user) {
-                                    setCurrentUser(user);
-                                  }
-                                }}
-                                className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold text-gray-800 outline-none appearance-none cursor-pointer focus:ring-2 focus:ring-accent/20 transition-all text-sm"
-                              >
-                                <option value="">Choose User...</option>
-                                {users.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                              </select>
-                              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
-                                <ChevronRight size={18} className="rotate-90" />
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {currentUser && users.some(u => u.id === currentUser.id) && (
-                            <motion.div 
-                              initial={{ opacity: 0, y: -10 }}
-                              animate={{ opacity: 1, y: 0 }}
-                              className="flex flex-col gap-4"
-                            >
-                               <div className="px-5 py-4 bg-[#f0f4f0] rounded-2xl text-[11px] font-bold text-gray-500 flex items-center justify-between border border-gray-100">
-                                 <div className="flex flex-col">
-                                   <span className="text-[8px] uppercase tracking-tighter opacity-60">Verified Phone</span>
-                                   <span className="text-gray-800 text-sm font-black">{currentUser.phone}</span>
-                                 </div>
-                                 <div className="w-8 h-8 bg-white text-accent rounded-full flex items-center justify-center shadow-sm">
-                                   <User size={14} />
-                                 </div>
-                               </div>
-                               <button 
-                                onClick={() => setIsUserModalOpen(false)}
-                                className="w-full py-5 bg-gray-900 text-white rounded-2xl font-black text-xs shadow-xl hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-3 uppercase tracking-[4px]"
-                              >
-                                Sign In Now <ChevronRight size={14} />
-                              </button>
-                            </motion.div>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="py-12 flex flex-col items-center text-center gap-4">
-                          <div className="w-16 h-16 bg-gray-50 text-gray-300 rounded-full flex items-center justify-center">
-                            <User size={32} />
-                          </div>
-                          <p className="text-xs text-gray-400 font-bold uppercase tracking-widest leading-relaxed">No registered users found.<br/>Please register first.</p>
-                          <button 
-                            onClick={() => setAuthTab('register')}
-                            className="text-accent font-black text-[10px] uppercase tracking-widest hover:underline"
-                          >
-                            Go to Registration
-                          </button>
-                        </div>
-                      )}
+                      <div className="flex flex-col gap-3">
+                        <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">Login</label>
+                        <input
+                          type="text"
+                          value={loginPhone}
+                          onChange={(e) => setLoginPhone(e.target.value)}
+                          placeholder="Phone Number / Username"
+                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
+                        />
+                        <input
+                          type="password"
+                          value={loginPassword}
+                          onChange={(e) => setLoginPassword(e.target.value)}
+                          placeholder="Password"
+                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
+                        />
+                        <button 
+                          onClick={handleLogin}
+                          disabled={authLoading}
+                          className="w-full py-5 mt-2 bg-gray-900 text-white rounded-2xl font-black text-xs shadow-xl hover:bg-black active:scale-95 transition-all flex items-center justify-center gap-3 uppercase tracking-[4px]"
+                        >
+                          {authLoading ? 'Signing in...' : 'Sign In Now'} <ChevronRight size={14} />
+                        </button>
+                      </div>
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
@@ -1650,16 +1683,19 @@ export default function App() {
                           className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
                         />
                         
+                        <input
+                          type="password"
+                          value={regPassword}
+                          onChange={(e) => setRegPassword(e.target.value)}
+                          placeholder="Password"
+                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
+                        />
                         <button 
-                          onClick={() => {
-                            if (newName && newPhone) {
-                              handleCreateUser();
-                              setRegStep('success');
-                            }
-                          }}
+                          onClick={handleRegister}
+                          disabled={authLoading}
                           className="w-full py-5 mt-4 bg-accent text-white rounded-2xl font-black text-xs shadow-xl shadow-accent/20 active:scale-95 transition-all uppercase tracking-[4px]"
                         >
-                          Register & Sign In
+                          {authLoading ? 'Registering...' : 'Register & Sign In'}
                         </button>
                       </div>
                     </div>
