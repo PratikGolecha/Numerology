@@ -155,6 +155,15 @@ export default function App() {
     }
   }, []);
 
+  // Fetch users for dropdown when modal is open
+  useEffect(() => {
+    if (isUserModalOpen) {
+      fetchApi('/users').then(res => {
+        if (res.users) setUsers(res.users);
+      }).catch(err => console.log("Could not load users for dropdown:", err));
+    }
+  }, [isUserModalOpen]);
+
   const loadBackendData = async () => {
     try {
       const userRes = await fetchApi('/auth/me');
@@ -1647,13 +1656,31 @@ export default function App() {
                     <div className="flex flex-col gap-6">
                       <div className="flex flex-col gap-3">
                         <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest pl-1">Login</label>
-                        <input
-                          type="text"
-                          value={loginPhone}
-                          onChange={(e) => setLoginPhone(e.target.value)}
-                          placeholder="Phone Number / Username"
-                          className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
-                        />
+                        {users.length > 0 ? (
+                          <div className="relative">
+                            <select
+                              value={loginPhone}
+                              onChange={(e) => setLoginPhone(e.target.value)}
+                              className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm appearance-none"
+                            >
+                              <option value="">Select User Profile...</option>
+                              {users.map(u => (
+                                <option key={u.id} value={u.phone}>{u.name} ({u.phone})</option>
+                              ))}
+                            </select>
+                            <div className="absolute right-5 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+                            </div>
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            value={loginPhone}
+                            onChange={(e) => setLoginPhone(e.target.value)}
+                            placeholder="Phone Number / Username"
+                            className="w-full bg-gray-50 border border-gray-100 rounded-2xl px-5 py-4 font-bold outline-none focus:ring-2 focus:ring-accent/20 transition-all text-sm"
+                          />
+                        )}
                         <button 
                           onClick={handleLogin}
                           disabled={authLoading}
